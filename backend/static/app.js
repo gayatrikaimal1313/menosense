@@ -155,3 +155,90 @@ document.getElementById('calibration-form').addEventListener('submit', async (e)
 fetchData();
 // Poll every 2 seconds
 setInterval(fetchData, 2000);
+document.addEventListener("DOMContentLoaded", () => {
+    const items = document.querySelectorAll('.sidebar-item');
+
+    items.forEach(item => {
+        item.addEventListener('click', () => {
+            console.log("Clicked:", item.innerText); // DEBUG
+
+            // remove active from all
+            items.forEach(i => i.classList.remove('active'));
+
+            // activate clicked
+            item.classList.add('active');
+        });
+    });
+});
+document.addEventListener("DOMContentLoaded", () => {
+    const navLinks = document.querySelectorAll("aside.sidebar nav a");
+
+    navLinks.forEach(link => {
+        link.addEventListener("click", (event) => {
+            event.preventDefault();
+
+            console.log("Clicked:", link.innerText.trim());
+
+            navLinks.forEach(item => item.classList.remove("active"));
+            link.classList.add("active");
+        });
+    });
+});
+document.addEventListener("DOMContentLoaded", () => {
+    const navLinks = document.querySelectorAll("aside.sidebar nav a");
+    const main = document.querySelector("main.main-content");
+
+    const pages = {
+        "Overview": main.innerHTML,
+
+        "Events": `
+            <header>
+                <h1>Events</h1>
+                <p class="subtitle">Detected hot flash events and symptom history.</p>
+            </header>
+            <section class="card full-width">
+                <h2>Recent Events</h2>
+                <p>No confirmed hot flash events yet.</p>
+            </section>
+        `,
+
+        "Night Tracking": `
+            <header>
+                <h1>Night Tracking</h1>
+                <p class="subtitle">Overnight monitoring.</p>
+            </header>
+            <section class="card full-width">
+                <h2>Night Summary</h2>
+                <p>No overnight session recorded yet.</p>
+            </section>
+        `,
+
+        "Clinical Report": `
+            <header>
+                <h1>Clinical Report</h1>
+                <p class="subtitle">Exportable summary.</p>
+            </header>
+            <section class="card full-width">
+                <h2>Report Summary</h2>
+                <p>Clinical report generation will appear here.</p>
+            </section>
+        `
+    };
+
+    navLinks.forEach(link => {
+        link.addEventListener("click", (event) => {
+            event.preventDefault();
+
+            const pageName = link.innerText.trim();
+
+            navLinks.forEach(item => item.classList.remove("active"));
+            link.classList.add("active");
+
+            if (pages[pageName]) {
+                main.innerHTML = pages[pageName];
+            }
+
+            console.log("Switched to:", pageName);
+        });
+    });
+});
