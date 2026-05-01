@@ -1,30 +1,38 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 #include <ESP8266HTTPClient.h>
+#include <ESP8266WebServer.h>
 #include <WiFiClient.h>
 #include <Wire.h>
-#include <SHT2x.h>
 #include <ArduinoJson.h>
 
-const char* ap_ssid = "MenoSense_Internal";
-const char* backend_url = "http://192.168.4.2:8000/api/data";
+// --- SETTINGS ---
+const char* AP_SSID_SETUP = "MenoSense_Setup";
+const char* BACKEND_URL = "http://192.168.4.2:8000/api/data"; // Update this to your computer's IP if needed
 
-SHT2x sht;
+// Pins
+#define SDA_PIN 4   // D2 on ESP8266
+#define SCL_PIN 5   // D1 on ESP8266
+#define ADC_PIN A0
+#define LED_STATUS 15 // D8
 
-const int LED_WIFI = 15;
-const int ADC_PIN = A0;
+// SHT20 Address
+#define SHT20_ADDR 0x40
 
-// Calibration Table: Voltage -> Conductance (uS)
+// Global Objects
+ESP8266WebServer server(80);
+WiFiClient wifiClient;
+
+// --- CALIBRATION TABLE (Voltage -> Conductance uS) ---
 struct CalPoint {
     float voltage;
     float conductance;
 };
 
-// Sorted by voltage ascending
 CalPoint calTable[] = {
     {0.050, 20.000},
     {0.360, 4.545},
-    {0.380, 10.000}, // Preserving original data order anomaly by sorting voltage
+    {0.380, 10.000},
     {0.530, 2.128},
     {0.590, 1.000},
     {0.650, 0.455},
@@ -43,94 +51,197 @@ float voltageToConductance(float voltage) {
             float c1 = calTable[i].conductance;
             float v2 = calTable[i + 1].voltage;
             float c2 = calTable[i + 1].conductance;
-            
-            // Linear interpolation
             return c1 + (voltage - v1) * (c2 - c1) / (v2 - v1);
         }
     }
-    return 0.0; // fallback
+    return 0.0;
 }
+
+// --- SHT20 FUNCTIONS (As provided in baseline) ---
+float readTemperature() {
+    Wire.beginTransmission(SHT20_ADDR);
+    Wire.write(0xF3);
+    Wire.endTransmission();
+    delay(85);
+    Wire.requestFrom(SHT20_ADDR, 3);
+    if (Wire.available() < 2) return NAN;
+    uint16_t raw = Wire.read() << 8;
+    raw |= Wire.read();
+    raw &= 0xFFFC;
+    return -46.85 + 175.72 * ((float)raw / 65536.0);
+}
+
+float readHumidity() {
+    Wire.beginTransmission(SHT20_ADDR);
+    Wire.write(0xF5);
+    Wire.endTransmission();
+    delay(30);
+    Wire.requestFrom(SHT20_ADDR, 3);
+    if (Wire.available() < 2) return NAN;
+    uint16_t raw = Wire.read() << 8;
+    raw |= Wire.read();
+    raw &= 0xFFFC;
+    return -6.0 + 125.0 * ((float)raw / 65536.0);
+}
+
+// --- WIFI CONFIG SERVER ---
+void handleRoot() {
+    String html = "<html><body><h1>MenoSense WiFi Setup</h1>";
+    html += "<form action='/configure' method='POST'>";
+    html += "SSID: <input type='text' name='ssid'><br>";
+    html += "Password: <input type='password' name='pass'><br>";
+    html += "<input type='submit' value='Connect'>";
+    html += "</form></body></html>";
+    server.send(200, "text/html", html);
+}
+
+void handleConfigure() {
+    if (server.hasArg("ssid") && server.hasArg("pass")) {
+        String ssid = server.arg("ssid");
+        String pass = server.arg("pass");
+        
+        server.send(200, "text/plain", "Saving credentials and restarting...");
+        delay(1000);
+        
+        Serial.printf("Connecting to %s...\n", ssid.c_str());
+        WiFi.begin(ssid.c_str(), pass.c_str());
+        
+        // Wait up to 10s to see if it works before restarting to apply permanently
+        int retry = 0;
+        while (WiFi.status() != WL_CONNECTED && retry < 20) {
+            delay(500);
+            Serial.print(".");
+            retry++;
+        }
+        
+        if (WiFi.status() == WL_CONNECTED) {
+            Serial.println("\nWiFi Connected! Restarting...");
+            ESP.restart();
+        } else {
+            Serial.println("\nConnection failed. Please try again.");
+        }
+    }
+}
+
+// --- SETUP & LOOP ---
+bool apMode = false;
 
 void setup() {
     Serial.begin(115200);
-    pinMode(LED_WIFI, OUTPUT);
-    digitalWrite(LED_WIFI, LOW);
+    delay(1000);
+    Serial.println("\n\n--- MenoSense Hardware Init ---");
 
-    Wire.begin(4, 5); // SDA = GPIO4, SCL = GPIO5
-    sht.begin();
+    pinMode(LED_STATUS, OUTPUT);
+    digitalWrite(LED_STATUS, LOW);
 
-    Serial.println("Configuring Access Point...");
-    WiFi.softAP(ap_ssid);
+    Wire.begin(SDA_PIN, SCL_PIN);
     
-    IPAddress IP = WiFi.softAPIP();
-    Serial.print("AP IP address: ");
-    Serial.println(IP);
-    Serial.println("Network Ready. Connect computer to 'MenoSense_Internal'");
+    // Check SHT20
+    float testTemp = readTemperature();
+    if (isnan(testTemp)) {
+        Serial.println("SHT20: FAILED to detect!");
+    } else {
+        Serial.printf("SHT20: Detected. Current Temp: %.2f C\n", testTemp);
+    }
+
+    // Try saved WiFi
+    Serial.print("WiFi: Connecting to saved credentials");
+    WiFi.begin(); // Uses saved flash credentials
     
-    digitalWrite(LED_WIFI, HIGH); // AP is active
+    int retries = 0;
+    while (WiFi.status() != WL_CONNECTED && retries < 30) {
+        delay(500);
+        Serial.print(".");
+        retries++;
+    }
+
+    if (WiFi.status() == WL_CONNECTED) {
+        Serial.println("\nWiFi: Connected!");
+        Serial.print("IP: ");
+        Serial.println(WiFi.localIP());
+        digitalWrite(LED_STATUS, HIGH);
+    } else {
+        Serial.println("\nWiFi: Failed to connect. Starting AP Mode...");
+        WiFi.mode(WIFI_AP);
+        WiFi.softAP(AP_SSID_SETUP);
+        Serial.print("AP Name: "); Serial.println(AP_SSID_SETUP);
+        Serial.print("AP IP: "); Serial.println(WiFi.softAPIP());
+        
+        server.on("/", handleRoot);
+        server.on("/configure", HTTP_POST, handleConfigure);
+        server.begin();
+        apMode = true;
+    }
 }
 
+unsigned long lastPost = 0;
+const unsigned long INTERVAL = 2000;
+
 void loop() {
-    // 1. Read SHT20
-    sht.read();
-    float temp = sht.getTemperature();
-    float humidity = sht.getHumidity();
+    // 1. Read Sensors (Always read for serial monitor)
+    float temp = readTemperature();
+    float humidity = readHumidity();
+    int rawAdc = analogRead(ADC_PIN);
+    float voltage = (rawAdc / 1023.0) * 3.3;
+    bool edaAvailable = (rawAdc > 50);
+    float conductance = edaAvailable ? voltageToConductance(voltage) : 0;
+    String sensorStatus = edaAvailable ? "full-sensor" : "temperature-only";
 
-    // 2. Read ADC for mock EDA data
-    int rawAdc = analogRead(ADC_PIN); 
-    // Simulate battery voltage and mock EDA voltage
-    // ESP8266 ADC is 0-1V normally, but Wemos D1 mini has a voltage divider to support 0-3.3V mapping to 0-1023.
-    // Let's assume the ADC is measuring EDA directly (0-1V internal mapped from 0-3.3V).
-    float edaVoltage = (rawAdc / 1023.0) * 3.3; 
-    
-    // Since EDA is not connected, let's inject a mock oscillation or random noise if voltage is 0
-    if (rawAdc < 10) {
-        // Mock a baseline with occasional peaks
-        static float mockVolts = 0.59;
-        static int cycle = 0;
-        cycle++;
-        if (cycle > 50 && cycle < 60) {
-            mockVolts -= 0.05; // rapid drop in voltage -> rapid rise in conductance
-        } else if (cycle >= 60) {
-            mockVolts += 0.005; // slow recovery
-            if (mockVolts > 0.59) {
-                mockVolts = 0.59;
-                cycle = 0;
-            }
+    // 2. Serial Output (Always show)
+    static unsigned long lastSerial = 0;
+    if (millis() - lastSerial >= 2000) {
+        lastSerial = millis();
+        Serial.println("--- SENSOR DATA ---");
+        Serial.printf("Mode: %s | WiFi: %d\n", apMode ? "AP (Setup)" : "Station", WiFi.status());
+        if (isnan(temp)) Serial.println("SHT20: READ FAILURE");
+        else Serial.printf("Temp: %.2f C | Humidity: %.2f %%\n", temp, humidity);
+        Serial.printf("ADC: %d (%.3f V)\n", rawAdc, voltage);
+        if (edaAvailable) Serial.printf("Conductance: %.3f uS\n", conductance);
+        else Serial.println("EDA: Unavailable");
+        Serial.println("-------------------");
+    }
+
+    if (apMode) {
+        server.handleClient();
+        static unsigned long lastBlink = 0;
+        if (millis() - lastBlink > 500) {
+            digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
+            lastBlink = millis();
         }
-        edaVoltage = mockVolts;
+        return;
     }
 
-    float conductance = voltageToConductance(edaVoltage);
+    if (millis() - lastPost >= INTERVAL) {
+        lastPost = millis();
+        // 3. HTTP POST (Only in station mode)
+        HTTPClient http;
+        // ... rest of the POST logic
+        http.begin(wifiClient, BACKEND_URL);
+        http.addHeader("Content-Type", "application/json");
 
-    // Mock battery voltage 
-    float batteryVoltage = 3.7; // Fixed for now, realistically would be measured on another pin or multiplexed
+        StaticJsonDocument<256> doc;
+        if (edaAvailable) doc["conductance"] = conductance;
+        else doc["conductance"] = nullptr;
+        
+        doc["temperature"] = isnan(temp) ? 0.0 : temp;
+        doc["humidity"] = isnan(humidity) ? 0.0 : humidity;
+        doc["batteryVoltage"] = 3.7; // Mock for now until divider is added
+        doc["wifiConnected"] = true;
+        doc["edaAvailable"] = edaAvailable;
+        doc["sensorStatus"] = sensorStatus;
 
-    // 3. Send to Backend
-    WiFiClient client;
-    HTTPClient http;
-    
-    http.begin(client, backend_url);
-    http.addHeader("Content-Type", "application/json");
-
-    StaticJsonDocument<200> doc;
-    doc["conductance"] = conductance;
-    doc["temperature"] = temp;
-    doc["humidity"] = humidity;
-    doc["batteryVoltage"] = batteryVoltage;
-    doc["wifiConnected"] = true;
-
-    String requestBody;
-    serializeJson(doc, requestBody);
-
-    int httpResponseCode = http.POST(requestBody);
-    
-    if (httpResponseCode > 0) {
-        Serial.printf("HTTP POST Success: %d\n", httpResponseCode);
-    } else {
-        Serial.printf("HTTP POST Error: %s (Check if computer is connected to ESP Wi-Fi)\n", http.errorToString(httpResponseCode).c_str());
+        String body;
+        serializeJson(doc, body);
+        int code = http.POST(body);
+        
+        Serial.printf("POST Result: %d\n\n", code);
+        http.end();
+        
+        // Blink LED on success
+        if (code == 200) {
+            digitalWrite(LED_STATUS, LOW);
+            delay(50);
+            digitalWrite(LED_STATUS, HIGH);
+        }
     }
-    http.end();
-
-    delay(2000); // Sample every 2 seconds
 }

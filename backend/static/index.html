@@ -79,17 +79,30 @@
             <section class="live-monitoring">
                 <div class="card full-width">
                     <div class="card-header">
-                        <h2>Live Monitoring</h2>
+                        <h2>Biometric Monitoring</h2>
                         <div class="badges">
                             <span class="badge live-badge"><span class="pulse-dot"></span> Streaming Live</span>
                         </div>
                     </div>
-                    <div class="chart-container">
-                        <canvas id="liveChart"></canvas>
+                    
+                    <div class="charts-grid">
+                        <div class="chart-box">
+                            <h3>Skin Conductance (µS)</h3>
+                            <div class="chart-container">
+                                <canvas id="liveChart"></canvas>
+                            </div>
+                        </div>
+                        <div class="chart-box">
+                            <h3>Core Temperature (°C)</h3>
+                            <div class="chart-container">
+                                <canvas id="tempChart"></canvas>
+                            </div>
+                        </div>
                     </div>
+
                     <div class="live-metrics">
                         <div class="metric">
-                            <label>Baseline</label>
+                            <label>Baseline EDA</label>
                             <span id="live-baseline">-- µS</span>
                         </div>
                         <div class="metric">

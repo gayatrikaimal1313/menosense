@@ -52,6 +52,43 @@ const chartConfig = {
 
 const liveChart = new Chart(ctx, chartConfig);
 
+const tempCtx = document.getElementById('tempChart').getContext('2d');
+const tempGradient = tempCtx.createLinearGradient(0, 0, 0, 250);
+tempGradient.addColorStop(0, 'rgba(247, 160, 114, 0.5)');
+tempGradient.addColorStop(1, 'rgba(247, 160, 114, 0.0)');
+
+const tempChartConfig = {
+    type: 'line',
+    data: {
+        labels: [],
+        datasets: [{
+            label: 'Temperature (°C)',
+            data: [],
+            borderColor: '#f7a072',
+            backgroundColor: tempGradient,
+            borderWidth: 2,
+            pointRadius: 0,
+            fill: true,
+            tension: 0.4
+        }]
+    },
+    options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: { legend: { display: false } },
+        scales: {
+            x: { display: false },
+            y: {
+                display: true,
+                title: { display: true, text: 'Temp (°C)' },
+                grid: { color: '#edf2f7' }
+            }
+        },
+        animation: { duration: 0 }
+    }
+};
+const tempChart = new Chart(tempCtx, tempChartConfig);
+
 let baseline = 0.59;
 const MAX_DATAPOINTS = 100;
 
@@ -60,53 +97,72 @@ async function fetchData() {
         const response = await fetch('/api/data');
         const data = await response.json();
         
-        if (data.history && data.history.length > 0) {
-            updateDashboard(data.history, data.inference);
+        if (data.history) {
+            updateDashboard(data.history, data.inference, data.lastSync, data.deviceConnected);
         }
     } catch (error) {
         console.error("Error fetching data:", error);
-        document.getElementById('nav-connection-status').textContent = 'Disconnected';
+        document.getElementById('nav-connection-status').textContent = 'Backend Offline';
         document.getElementById('nav-connection-status').previousElementSibling.className = 'status-dot offline';
     }
 }
 
-function updateDashboard(history, inference) {
+function updateDashboard(history, inference, lastSync, deviceConnected) {
+    const statusEl = document.getElementById('nav-connection-status');
+    const statusDot = statusEl.previousElementSibling;
+    const heroConductance = document.getElementById('hero-conductance');
+    const heroTrend = document.getElementById('hero-conductance-trend');
+
+    if (!history || history.length === 0) {
+        statusEl.textContent = 'Waiting for ESP data...';
+        statusDot.className = 'status-dot offline';
+        heroConductance.textContent = '--';
+        heroTrend.textContent = 'Awaiting Sensor...';
+        return;
+    }
+
     const latest = history[history.length - 1];
     
     // Update Hero
-    document.getElementById('hero-conductance').textContent = latest.conductance.toFixed(2);
+    heroConductance.textContent = latest.edaAvailable ? latest.conductance.toFixed(2) : '--';
     document.getElementById('hero-temp').textContent = latest.temperature.toFixed(1);
     document.getElementById('hero-humidity').textContent = latest.humidity.toFixed(0);
 
     // Update Connection Status
-    if (latest.wifiConnected) {
-        document.getElementById('nav-connection-status').textContent = 'Connected';
-        document.getElementById('nav-connection-status').previousElementSibling.className = 'status-dot online';
+    if (deviceConnected) {
+        statusEl.textContent = latest.edaAvailable ? 'ESP Connected' : 'Temp-only Mode';
+        statusDot.className = 'status-dot online';
     } else {
-        document.getElementById('nav-connection-status').textContent = 'Offline Logging';
-        document.getElementById('nav-connection-status').previousElementSibling.className = 'status-dot offline';
+        statusEl.textContent = 'ESP Disconnected';
+        statusDot.className = 'status-dot offline';
     }
 
     // Update Battery Status (Assuming 4.2 max, 3.3 min)
     let batteryPct = ((latest.batteryVoltage - 3.3) / (4.2 - 3.3)) * 100;
     batteryPct = Math.min(100, Math.max(0, batteryPct));
-    document.getElementById('nav-battery-status').textContent = `${batteryPct.toFixed(0)}% - Active`;
+    document.getElementById('nav-battery-status').textContent = `${batteryPct.toFixed(0)}% - ${latest.sensorStatus}`;
     
-    // Update Chart
+    // Update Charts
     const recentHistory = history.slice(-MAX_DATAPOINTS);
-    liveChart.data.labels = recentHistory.map(d => new Date(d.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}));
-    liveChart.data.datasets[0].data = recentHistory.map(d => d.conductance);
+    const timeLabels = recentHistory.map(d => new Date(d.timestamp * 1000).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', second:'2-digit'}));
+    
+    // EDA Chart
+    liveChart.data.labels = timeLabels;
+    liveChart.data.datasets[0].data = recentHistory.map(d => d.edaAvailable ? d.conductance : null);
     liveChart.update();
+
+    // Temp Chart
+    tempChart.data.labels = timeLabels;
+    tempChart.data.datasets[0].data = recentHistory.map(d => d.temperature);
+    tempChart.update();
 
     // Update Inference state
     const stateEl = document.getElementById('live-state');
-    const heroTrend = document.getElementById('hero-conductance-trend');
     
     if (inference) {
         stateEl.textContent = inference.state;
-        // Add source info
-        if (inference.source !== "Monitoring") {
-            stateEl.textContent += ` (via ${inference.source})`;
+        if (inference.source && inference.source !== "None" && inference.source !== "Hardware Data") {
+            stateEl.textContent += ` (${inference.source})`;
         }
 
         if (inference.state.includes("Detected")) {
@@ -115,16 +171,25 @@ function updateDashboard(history, inference) {
             heroTrend.className = 'trend text-red';
         } else {
             stateEl.className = 'state-stable';
-            heroTrend.textContent = 'Stable';
+            heroTrend.textContent = latest.edaAvailable ? 'Stable' : 'Temp Monitor';
             heroTrend.className = 'trend neutral';
         }
     }
 
     // Update rolling baseline
-    baseline = recentHistory.reduce((acc, d) => acc + d.conductance, 0) / recentHistory.length;
-    document.getElementById('live-baseline').textContent = `${baseline.toFixed(2)} µS`;
+    const edaValues = recentHistory.filter(d => d.edaAvailable).map(d => d.conductance);
+    if (edaValues.length > 0) {
+        baseline = edaValues.reduce((acc, v) => acc + v, 0) / edaValues.length;
+        document.getElementById('live-baseline').textContent = `${baseline.toFixed(2)} µS`;
+    } else {
+        document.getElementById('live-baseline').textContent = 'N/A';
+    }
 
-    document.getElementById('nav-last-sync').textContent = new Date().toLocaleTimeString();
+    if (lastSync > 0) {
+        document.getElementById('nav-last-sync').textContent = new Date(lastSync * 1000).toLocaleTimeString();
+    } else {
+        document.getElementById('nav-last-sync').textContent = 'Never';
+    }
 }
 
 // Calibration Form Handling
