@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MenoSense Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <aside class="sidebar">
+            <div class="logo">
+                <i class="fa-solid fa-droplet"></i>
+                <span>MenoSense</span>
+            </div>
+            <nav>
+                <a href="#" class="active"><i class="fa-solid fa-chart-line"></i> Overview</a>
+                <a href="#"><i class="fa-solid fa-heart-pulse"></i> Events</a>
+                <a href="#"><i class="fa-solid fa-moon"></i> Night Tracking</a>
+                <a href="#"><i class="fa-solid fa-stethoscope"></i> Clinical Report</a>
+            </nav>
+            <div class="device-status-widget">
+                <h4>Device Status</h4>
+                <div class="status-item">
+                    <span class="status-dot online"></span>
+                    <span id="nav-connection-status">Connected</span>
+                </div>
+                <div class="status-item">
+                    <i class="fa-solid fa-battery-three-quarters"></i>
+                    <span id="nav-battery-status">85% - Active</span>
+                </div>
+                <div class="status-item small-text">
+                    Last sync: <span id="nav-last-sync">Just now</span>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <header>
+                <div>
+                    <h1>Good Morning, Sarah</h1>
+                    <p class="subtitle">Here's your symptom summary for today.</p>
+                </div>
+                <div class="user-profile">
+                    <div class="avatar">S</div>
+                </div>
+            </header>
+
+            <!-- Hero Summary -->
+            <section class="hero-summary">
+                <div class="card summary-card primary">
+                    <h3>Hot Flashes Today</h3>
+                    <div class="value">3</div>
+                    <div class="trend positive"><i class="fa-solid fa-arrow-down"></i> 2 fewer than yesterday</div>
+                </div>
+                <div class="card summary-card">
+                    <h3>Avg Severity</h3>
+                    <div class="value">Mild</div>
+                    <div class="trend neutral">Consistent with weekly avg</div>
+                </div>
+                <div class="card summary-card">
+                    <h3>Current Conductance</h3>
+                    <div class="value"><span id="hero-conductance">--</span> <small>µS</small></div>
+                    <div class="trend" id="hero-conductance-trend">Stable</div>
+                </div>
+                <div class="card summary-card">
+                    <h3>Environment</h3>
+                    <div class="value"><span id="hero-temp">--</span>°C</div>
+                    <div class="trend">Humidity: <span id="hero-humidity">--</span>%</div>
+                </div>
+            </section>
+
+            <!-- Live Monitoring Panel -->
+            <section class="live-monitoring">
+                <div class="card full-width">
+                    <div class="card-header">
+                        <h2>Live Monitoring</h2>
+                        <div class="badges">
+                            <span class="badge live-badge"><span class="pulse-dot"></span> Streaming Live</span>
+                        </div>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="liveChart"></canvas>
+                    </div>
+                    <div class="live-metrics">
+                        <div class="metric">
+                            <label>Baseline</label>
+                            <span id="live-baseline">-- µS</span>
+                        </div>
+                        <div class="metric">
+                            <label>Event State</label>
+                            <span id="live-state" class="state-stable">Stable</span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <div class="grid-2-col">
+                <!-- Calibration Panel -->
+                <section class="calibration-section">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Sensor Calibration</h2>
+                            <i class="fa-solid fa-sliders"></i>
+                        </div>
+                        <p class="small-text" style="margin-bottom: 1rem;">Adjust the baseline and sensitivity for real-world calibration.</p>
+                        <form id="calibration-form">
+                            <div class="form-row">
+                                <div class="input-group">
+                                    <label>Offset (µS)</label>
+                                    <input type="number" id="cal-offset" step="0.01" value="0.00">
+                                </div>
+                                <div class="input-group">
+                                    <label>Sensitivity</label>
+                                    <input type="number" id="cal-multiplier" step="0.1" value="1.0">
+                                </div>
+                            </div>
+                            <button type="submit" class="btn-primary" style="width: 100%; margin-top: 1rem;">Save Calibration</button>
+                        </form>
+                        <div id="cal-status" class="small-text" style="margin-top: 0.5rem; text-align: center;"></div>
+                    </div>
+                </section>
+
+                <!-- Symptom Pattern Insights -->
+                <section class="insights-section">
+                    <div class="card">
+                        <h2>Symptom Insights</h2>
+                        <ul class="insight-list">
+                            <li>
+                                <i class="fa-solid fa-sun text-orange"></i>
+                                <p>Symptoms cluster most often in the <strong>late afternoon</strong>.</p>
+                            </li>
+                            <li>
+                                <i class="fa-solid fa-temperature-arrow-up text-red"></i>
+                                <p>Higher humidity (>50%) appears to correlate with <strong>stronger events</strong>.</p>
+                            </li>
+                            <li>
+                                <i class="fa-solid fa-bed text-blue"></i>
+                                <p>Nighttime episodes <strong>decreased</strong> this week by 15%.</p>
+                            </li>
+                            <li>
+                                <i class="fa-solid fa-person-running text-green"></i>
+                                <p>Recent events occurred during low-activity periods, making hot flashes more likely than exercise-related sweating.</p>
+                            </li>
+                        </ul>
+                    </div>
+                </section>
+            </div>
+
+        </main>
+    </div>
+    <script src="/static/app.js"></script>
+</body>
+</html>
