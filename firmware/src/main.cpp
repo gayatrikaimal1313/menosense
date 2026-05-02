@@ -8,7 +8,7 @@
 
 // --- SETTINGS ---
 const char* AP_SSID_SETUP = "MenoSense_Setup";
-const char* BACKEND_URL = "http://192.168.86.45:8000/api/data"; // Update this to your computer's IP if needed
+const char* BACKEND_URL = "http://192.168.4.2:8000/api/data"; // Update this to your computer's IP if needed
 
 // Pins
 #define SDA_PIN 4   // D2 on ESP8266
